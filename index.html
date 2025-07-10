@@ -3,69 +3,236 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RoadGauge Map with Live API</title>
-
+    <title>GPS Calculator with Zoom Control</title>
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
     />
-
     <style>
       body {
         margin: 0;
         padding: 0;
-        overflow: hidden;
-        font-family: sans-serif;
+        font-family: Arial;
       }
       #map {
         height: 100vh;
         width: 100vw;
       }
-      .loading-indicator {
+      .control-panel {
         position: absolute;
         top: 10px;
-        right: 10px;
-        background-color: rgba(255, 255, 255, 0.9);
-        padding: 8px 15px;
-        border-radius: 5px;
-        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        left: 10px;
         z-index: 1000;
-        font-size: 14px;
-        color: #555;
-        display: none;
+        background: rgba(255, 255, 255, 0.9);
+        padding: 15px;
+        border-radius: 8px;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.2);
+        width: 280px;
       }
-      #calculateOffsetBtn {
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        z-index: 1000;
-        padding: 10px 15px;
-        font-size: 14px;
+      .control-group {
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #eee;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
         font-weight: bold;
-        color: #ffff;
-        background-color: #007bff;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        color: #333;
       }
-      #calculateOffsetBtn:hover {
-        background-color: #0056b3;
+      input,
+      select,
+      button {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      button {
+        background: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+        margin-top: 5px;
+        transition: background 0.3s;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      button.secondary {
+        background: #f44336;
+      }
+      button.secondary:hover {
+        background: #d32f2f;
+      }
+      .zoom-display {
+        font-size: 14px;
+        text-align: center;
+        margin: 10px 0;
+        padding: 8px;
+        background: #f5f5f5;
+        border-radius: 4px;
+      }
+      .marker-info {
+        font-size: 12px;
+        color: #666;
+        margin-top: 5px;
       }
     </style>
   </head>
   <body>
     <div id="map"></div>
-    <button id="calculateOffsetBtn">Calculate 4 Offset Points</button>
-    <div class="loading-indicator" id="loadingIndicator">Loading points...</div>
 
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
+    <div class="control-panel">
+      <div class="control-group">
+        <label for="modeSelect">Calculation Mode:</label>
+        <select id="modeSelect">
+          <option value="4-points">4 Cardinal Points</option>
+          <option value="polygon">Polygon Points</option>
+          <option value="grid">Grid Points</option>
+          <option value="custom-bearings">Custom Bearings</option>
+        </select>
+      </div>
+
+      <div id="paramsContainer"></div>
+
+      <div class="control-group">
+        <label for="zoomSensitivity">Zoom Sensitivity:</label>
+        <input
+          type="range"
+          id="zoomSensitivity"
+          min="0.5"
+          max="1.5"
+          step="0.1"
+          value="1.0"
+        />
+        <div class="zoom-display">
+          Current Zoom: <span id="currentZoom">14</span>
+          <div class="marker-info">
+            Markers adjust automatically when zooming
+          </div>
+        </div>
+      </div>
+
+      <button id="toggleBtn" class="primary">Show Points</button>
+      <button id="clearBtn" class="secondary">Clear All</button>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="./map.js"></script>
+    <script>
+      const map = L.map("map").setView([28.6139, 77.209], 14);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap contributors",
+        maxZoom: 18,
+        minZoom: 10
+      }).addTo(map);
+
+      const offsetController = new OffsetPointsController(map);
+
+      function updateZoomDisplay() {
+        document.getElementById("currentZoom").textContent = map.getZoom();
+      }
+
+      map.on("zoomend", function () {
+        updateZoomDisplay();
+        if (offsetController.isVisible) {
+          offsetController.currentZoom = map.getZoom();
+          offsetController.refreshPoints();
+        }
+      });
+
+      document
+        .getElementById("toggleBtn")
+        .addEventListener("click", function () {
+          offsetController.toggleOffsetPoints();
+          this.textContent = offsetController.isVisible
+            ? "Hide Points"
+            : "Show Points";
+        });
+
+      document
+        .getElementById("clearBtn")
+        .addEventListener("click", function () {
+          offsetController.clearAllPoints();
+          document.getElementById("toggleBtn").textContent = "Show Points";
+        });
+
+      document
+        .getElementById("modeSelect")
+        .addEventListener("change", function () {
+          offsetController.setMode(this.value);
+          updateParametersUI(this.value);
+        });
+
+      document
+        .getElementById("zoomSensitivity")
+        .addEventListener("input", function () {
+          offsetController.zoomSensitivity = parseFloat(this.value);
+          if (offsetController.isVisible) offsetController.refreshPoints();
+        });
+
+      function updateParametersUI(mode) {
+        const container = document.getElementById("paramsContainer");
+        container.innerHTML = "";
+
+        switch (mode) {
+          case "polygon":
+            container.innerHTML = `
+                        <div class="control-group">
+                            <label for="polygonSides">Number of Sides (3-12):</label>
+                            <input type="number" id="polygonSides" value="6" min="3" max="12">
+                            <button onclick="applyPolygonParams()">Update Polygon</button>
+                        </div>
+                    `;
+            break;
+
+          case "grid":
+            container.innerHTML = `
+                        <div class="control-group">
+                            <label for="gridRows">Rows (1-10):</label>
+                            <input type="number" id="gridRows" value="3" min="1" max="10">
+                            <label for="gridCols">Columns (1-10):</label>
+                            <input type="number" id="gridCols" value="3" min="1" max="10">
+                            <button onclick="applyGridParams()">Update Grid</button>
+                        </div>
+                    `;
+            break;
+
+          case "custom-bearings":
+            container.innerHTML = `
+                        <div class="control-group">
+                            <label for="customBearings">Enter Bearings (comma separated):</label>
+                            <input type="text" id="customBearings" value="0,45,90,135,180,225,270,315" placeholder="e.g. 0,90,180,270">
+                            <button onclick="applyCustomParams()">Update Points</button>
+                        </div>
+                    `;
+            break;
+        }
+      }
+
+      window.applyPolygonParams = function () {
+        const sides = parseInt(document.getElementById("polygonSides").value);
+        offsetController.createPolygonPoints(sides);
+      };
+
+      window.applyGridParams = function () {
+        const rows = parseInt(document.getElementById("gridRows").value);
+        const cols = parseInt(document.getElementById("gridCols").value);
+        offsetController.createGridPoints(rows, cols);
+      };
+
+      window.applyCustomParams = function () {
+        const bearingsInput = document.getElementById("customBearings").value;
+        const bearings = bearingsInput
+          .split(",")
+          .map((b) => parseInt(b.trim()));
+        offsetController.createCustomPoints(bearings);
+      };
+
+      updateZoomDisplay();
+      updateParametersUI("4-points");
+    </script>
   </body>
 </html>
